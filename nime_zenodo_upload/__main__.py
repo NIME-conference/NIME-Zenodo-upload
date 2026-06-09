@@ -51,6 +51,8 @@ CONFERENCE_ACRONYM = 'NIME'
 
 # Maximum size for automatic supplementary upload (100 MB)
 MAX_SUPP_BYTES = 100 * 1024 * 1024
+# Maximum size for PDF upload (100 MB) – PDFs over this limit will abort the whole run.
+MAX_PDF_BYTES = 100 * 1024 * 1024
 
 # New dois and file names are appended to the text file nime_dois.txt
 DOI_FILENAME = "nime_dois.txt"
@@ -100,10 +102,12 @@ def upload_to_zenodo(metadata, pdf_path, production_zenodo=False):
 
     # Create new paper submission - add parsed metadata
     headers = {"Content-Type": "application/json"}
-    new_deposition = requests.post(url,
-                                   params={'access_token': TOKEN},
-                                   json=metadata,
-                                   headers=headers)
+    new_deposition = requests.post(
+        url,
+        params={'access_token': TOKEN},
+        json=metadata,
+        headers=headers
+    )
 
     # If creation of new deposition is unsuccessful, abort
     if new_deposition.status_code > 210:
@@ -248,6 +252,63 @@ def format_metadata(bibfilename, verbose=False, upload_pdf=False,
     '''
     bibdata = parser.parse_file(bibfilename)
 
+    # If we are going to upload PDFs, pre-check that none of them exceed MAX_PDF_BYTES.
+    if upload_pdf:
+        oversized_pdfs = []
+        missing_pdfs = []
+        for bib_id in bibdata.entries:
+            b = bibdata.entries[bib_id].fields
+            try:
+                conf_url = b['Url']
+                pdf_name = conf_url.rsplit('/', 1)[-1]
+                pdf_path = os.path.join(UPLOAD_FOLDER, pdf_name)
+
+                if not os.path.exists(pdf_path):
+                    missing_pdfs.append(pdf_name)
+                    continue
+
+                size = os.path.getsize(pdf_path)
+                if size > MAX_PDF_BYTES:
+                    oversized_pdfs.append((pdf_name, size))
+            except KeyError:
+                # If Url is missing, this entry will fail later anyway; let the normal logic handle it.
+                continue
+
+        if missing_pdfs:
+            click.secho(
+                "The following PDFs referenced in the .bib file do not exist in the upload folder:",
+                fg='red'
+            )
+            for name in sorted(set(missing_pdfs)):
+                click.secho(f"  - {name}", fg='red')
+            click.secho(
+                "Fix the missing files before running the upload.",
+                fg='red'
+            )
+            # Abort before any upload.
+            return
+
+        if oversized_pdfs:
+            click.secho(
+                "One or more PDFs are larger than 100 MB and will fail to upload:",
+                fg='red'
+            )
+            for name, size in sorted(set(oversized_pdfs)):
+                click.secho(
+                    f"  - {name}: {size / (1024 * 1024):.1f} MB",
+                    fg='red'
+                )
+            click.secho(
+                "Zenodo rejects these large PDF uploads (HTTP 413). "
+                "Please compress or split these PDFs to be under 100 MB and try again.",
+                fg='red'
+            )
+            click.secho(
+                "Aborting before starting any uploads. No Zenodo records were created.",
+                fg='red'
+            )
+            return
+
     title = 'title'
     abstract = 'abstract'
     address = 'address'
@@ -258,7 +319,7 @@ def format_metadata(bibfilename, verbose=False, upload_pdf=False,
     pdf_name = ''
     creators = []
 
-    #loop through the individual entries
+    # loop through the individual entries
     for bib_id in bibdata.entries:
         title = 'title'
         abstract = 'abstract'
