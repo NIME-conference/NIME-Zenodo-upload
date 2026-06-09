@@ -12,7 +12,9 @@ latexcodec = "^3.0.0"
 pybtex = "^0.24.0"
 click = "^8.1.7"
 requests = "^2.31.0"
-
+# setuptools<70 is needed because pybtex still imports pkg_resources,
+# which is no longer bundled with newer setuptools versions.
+setuptools = "<70"
 
 [build-system]
 requires = ["poetry-core"]
