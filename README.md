@@ -1,4 +1,3 @@
-```markdown
 # nime-zenodo-upload
 
 This Python project is for uploading NIME proceedings to Zenodo for archiving submissions and generating DOIs.
