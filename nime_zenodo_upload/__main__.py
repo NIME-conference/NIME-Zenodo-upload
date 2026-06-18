@@ -44,8 +44,8 @@ from pybtex.database.input import bibtex
 parser = bibtex.Parser()
 
 UPLOAD_FOLDER = './upload/'
-PUBLICATION_DATE = '2025-06-19'
-CONFERENCE_DATES = '24 June - 27 June, 2025'
+PUBLICATION_DATE = '2026-06-23'
+CONFERENCE_DATES = '23 June - 26 June, 2026'
 CONFERENCE_TITLE = 'International Conference on New Interfaces for Musical Expression'
 CONFERENCE_ACRONYM = 'NIME'
 
@@ -373,15 +373,16 @@ def format_metadata(bibfilename, verbose=False, upload_pdf=False,
                     'description': abstract,
                     'conference_title': CONFERENCE_TITLE,
                     'conference_acronym': CONFERENCE_ACRONYM,
-                    'conference_dates': CONFERENCE_DATES,  # hard coded, needs to be fixed
+                    'conference_dates': CONFERENCE_DATES,
                     'conference_place': address,
                     'conference_url': 'https://nime.org',
                     'publication_date': PUBLICATION_DATE,  # pubdate, # TODO fix this aspect
                     'partof_title': partof_title,
+                    'imprint_title': partof_title,
                     'creators': creators,
                     'communities': [{'identifier': 'nime_conference'}],  # adds to Zenodo NIME community
                     'imprint_isbn': isbn,
-                    'journal_issn': issn
+                    'imprint_issn': issn
                 }
             }
 
