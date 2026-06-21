@@ -75,7 +75,7 @@ def _print_response_json_or_text(resp, color='red'):
         click.secho(resp.text, fg=color)
 
 
-def upload_to_zenodo(metadata, pdf_path, production_zenodo=False):
+def upload_to_zenodo(metadata, pdf_path, production_zenodo=False, add_title=False):
     '''
     upload(metadata, pdf_path):
     - connects to zenodo REST API,
@@ -238,12 +238,29 @@ def upload_to_zenodo(metadata, pdf_path, production_zenodo=False):
         )
 
     # Record in the csv file.
+    # With --title:  pdf_path,submission_id,doi_field,title
+    # Without --title: pdf_path,submission_id,doi_field
+    if add_title:
+        title = metadata.get('metadata', {}).get('title', '')
+        if title is None:
+            title = ''
+        title = str(title).replace('\n', ' ').strip()
+        line = f'{pdf_path},{submission_id},{doi_field},{title}\n'
+    else:
+        line = f'{pdf_path},{submission_id},{doi_field}\n'
+
     with open(DOI_FILENAME, 'a') as doi_file:
-        doi_file.write(f'{pdf_path},{submission_id},{doi_field}\n')
+        doi_file.write(line)
 
 
-def format_metadata(bibfilename, verbose=False, upload_pdf=False,
-                    print_authors=False, production_zenodo=False):
+def format_metadata(
+    bibfilename,
+    verbose=False,
+    upload_pdf=False,
+    print_authors=False,
+    production_zenodo=False,
+    add_title=False
+):
     '''
     format_metadata(bibfilename):
     - formats contents of entries in the .bib file referenced by bibfilename
@@ -396,7 +413,12 @@ def format_metadata(bibfilename, verbose=False, upload_pdf=False,
                 pprint.pp(data['metadata'])
 
             if upload_pdf:
-                upload_to_zenodo(data, pdf_name, production_zenodo=production_zenodo)
+                upload_to_zenodo(
+                    data,
+                    pdf_name,
+                    production_zenodo=production_zenodo,
+                    add_title=add_title
+                )
 
         except (KeyError):
             # TODO Write failed bib ID's to a text file?
@@ -407,7 +429,13 @@ def format_metadata(bibfilename, verbose=False, upload_pdf=False,
 @click.command()
 @click.argument('bibfile', type=click.Path(exists=True))
 @click.option('--production', is_flag=True)
-def upload(bibfile, production):
+@click.option(
+    '--title',
+    'include_title',
+    is_flag=True,
+    help='Also append the paper title as the last field in nime_dois.txt'
+)
+def upload(bibfile, production, include_title):
     """Process metadata from a .bibtex file and upload to Zenodo."""
     if production:
         click.secho(
@@ -426,7 +454,8 @@ def upload(bibfile, production):
         upload_pdf=True,
         verbose=False,
         print_authors=False,
-        production_zenodo=production
+        production_zenodo=production,
+        add_title=include_title
     )
 
 
@@ -441,7 +470,8 @@ def check(bibfile, authors):
             upload_pdf=False,
             verbose=False,
             print_authors=True,
-            production_zenodo=False
+            production_zenodo=False,
+            add_title=False
         )
     else:
         format_metadata(
@@ -449,7 +479,8 @@ def check(bibfile, authors):
             upload_pdf=False,
             verbose=True,
             print_authors=False,
-            production_zenodo=False
+            production_zenodo=False,
+            add_title=False
         )
 
 

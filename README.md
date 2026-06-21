@@ -8,7 +8,7 @@ The python script reads a `.bib file` as used for the [NIME archive](https://git
 
 The metadata from the .bib entries are tied to the article (.pdf file) and are published to Zenodo resulting in the creation of a DOI.
 
-When this script is used to upload a new batch of papers the DOI and file name of each paper are added to the text file `nime_dois.txt`.
+When this script is used to upload a new batch of papers the DOI and file name of each paper are added to the text file `nime_dois.txt`. Optionally (with the `--title` flag) the paper title is also appended as a final field on each line, which is especially handy when working with translated papers and multiple DOIs.
 
 This project uses [Poetry](https://python-poetry.org) to manage dependencies.
 
@@ -22,7 +22,7 @@ For the proceedings chair of the conference, your workflow should be:
 
 Then you can pass the `nime_dois.txt` file to the proceedings officer of NIME who will:
 
-6. use the data from `nime_dois.txt` to make a `.csv` file associating each bibtex item key with the DOI.
+6. use the data from `nime_dois.txt` to make a `.csv` file associating each bibtex item key with the DOI (and, if useful, the title).
 7. use the `nime_bib` program in the [bibliography repo](https://github.com/NIME-conference/NIME-bibliography) to add DOIs to the correct bib file using the `csv` created in step 6.
 8. use the `get_publications` script on the NIME website repo and deploy the website to update with DOIs.
 
@@ -81,25 +81,62 @@ poetry run python nime_zenodo_upload upload upload/nime2023_music.bib --producti
 
 to do your final uploads.
 
-After a run, the script appends lines to `nime_dois.txt` with the format:
+You can also request that the title be written into `nime_dois.txt` alongside the DOI by adding the `--title` flag:
 
-```text
-pdf_filename,zenodo_deposition_id,doi_or_marked_doi
+```bash
+poetry run python nime_zenodo_upload upload upload/nime2023_music.bib --title
 ```
 
-For example:
+This is particularly useful when you later need to associate DOIs with translated titles or multiple language versions.
+
+### Format of `nime_dois.txt`
+
+After a run, the script appends lines to `nime_dois.txt` with one of two formats, depending on whether `--title` was used:
+
+- **Default (no `--title`)**:
+
+  ```text
+  pdf_filename,zenodo_deposition_id,doi_or_marked_doi
+  ```
+
+- **With `--title`**:
+
+  ```text
+  pdf_filename,zenodo_deposition_id,doi_or_marked_doi,title
+  ```
+
+For example, with `--title`:
 
 ```text
-nime2025_10.pdf,123456,10.5281/zenodo.15699550
+nime2025_10.pdf,123456,10.5281/zenodo.15699550,Weaving Before Electronics: A Spiral Design Process for Sound-Interface Making
 ```
 
 If **one or more supplementary files were skipped** because they were too large (see below), the DOI field is marked with `*` followed by a `;`‑separated list of the skipped filenames, e.g.:
 
 ```text
-nime2025_10.pdf,123456,10.5281/zenodo.15699550*nime2025_10_file01.mp4;nime2025_10_file02.mov
+nime2025_10.pdf,123456,10.5281/zenodo.15699550*nime2025_10_file01.mp4;nime2025_10_file02.mov,Weaving Before Electronics: A Spiral Design Process for Sound-Interface Making
 ```
 
-This allows you to identify which depositions need manual supplementary uploads.
+This allows you to identify which depositions need manual supplementary uploads while still keeping the title as a separate field at the end of each line (when `--title` is used).
+
+During post-processing, you can:
+
+- Without `--title`, treat the fields as:
+  - `pdf_filename`
+  - `zenodo_deposition_id`
+  - `doi_or_marked_doi`
+- With `--title`, treat the fields as:
+  - `pdf_filename`
+  - `zenodo_deposition_id`
+  - `doi_or_marked_doi`
+  - `title`
+
+In both cases, if the DOI field contains `*`, split at the `*` to get:
+
+- the actual DOI (before `*`), and  
+- the list of supplementary filenames that need manual handling (after `*`, split by `;`).
+
+The `--title` option is especially handy when working with translated papers, because we can add also the translated title to the bibtex (useful only for displaying the translated papers on nime.org).
 
 ## Conference Metadata
 
@@ -151,24 +188,23 @@ When any supplementary files are skipped for a given paper (either because they 
 
 - The DOI is followed by `*` and then a `;`‑separated list of the skipped filenames.
 
-Example:
+Example (with `--title`):
 
 ```text
-nime2025_10.pdf,123456,10.5281/zenodo.15699550*nime2025_10_file01.mp4
-nime2025_14.pdf,123457,10.5281/zenodo.15699591*nime2025_14_file01.mp4;nime2025_14_file02.mov
-nime2025_17.pdf,123458,10.5281/zenodo.15699598
+nime2025_10.pdf,123456,10.5281/zenodo.15699550*nime2025_10_file01.mp4,Weaving Before Electronics: A Spiral Design Process for Sound-Interface Making
+nime2025_14.pdf,123457,10.5281/zenodo.15699591*nime2025_14_file01.mp4;nime2025_14_file02.mov,Another Example Title
+nime2025_17.pdf,123458,10.5281/zenodo.15699598,Yet Another Title
 ```
 
 - `nime2025_10.pdf` has one skipped supplementary file (`nime2025_10_file01.mp4`).
 - `nime2025_14.pdf` has two skipped supplementary files.
 - `nime2025_17.pdf` had no problems; its DOI is unmarked.
+- In all cases, the final field is the paper title (when `--title` was used).
 
 During post-processing, you can:
 
 1. Parse each line of `nime_dois.txt`.
-2. If the DOI field contains `*`, split at the `*` to get:
-   - the actual DOI (before `*`), and
-   - the list of supplementary filenames that need manual handling (after `*`, split by `;`).
+2. Split the DOI field on `*` (if present) to separate the pure DOI from the list of skipped filenames.
 3. Manually upload those large supplementary files to the corresponding Zenodo deposition via the web UI.
 4. Optionally, update or regenerate `nime_dois.txt` once the manual uploads are complete and you know the final DOIs you want to distribute.
 
@@ -181,4 +217,3 @@ The .bib file: Special characters in the .bib file should be written with UTF-8 
 - Thanks to [Benedikte Wallace](https://www.linkedin.com/in/benedikte-wallace-8b489782/) for developing the Zenodo upload script in 2017–2018 or so.
 - Charles Martin did some work on this in 2024.
 - Stefano Fasciani did some work on this in 2025 and 2026.
-```
