@@ -94,6 +94,19 @@ poetry run python nime_zenodo_upload upload upload/nime2023_music.bib \
 
 This is particularly useful when you later need to associate DOIs with translated titles or multiple language versions.
 
+### Re-running after errors
+
+Production uploads write to `nime_dois.txt`; sandbox uploads write to `nime_dois_sandbox.txt`, so sandbox tests never mix with real DOIs.
+
+Zenodo sometimes answers slowly or with errors such as `504 Gateway Time-out`. The script is built so that you can simply re-run the same command:
+
+- Any PDF that already has a line in the DOI file for that server is skipped, so a re-run carries on where the last one stopped.
+- Read requests are retried a few times with increasing waits.
+- If a publish request errors, the script fetches the deposition again: a publish that timed out has often gone through anyway, in which case the DOI is recorded as normal.
+- Anything else that can't be confirmed (creating a deposition, uploading its PDF, a publish that really failed) stops the run with a message naming the deposition. Creating a deposition is never retried automatically, because a request that timed out may still have created one. Check your uploads on Zenodo, delete any unpublished draft (or publish it and add its line to the DOI file), then re-run.
+
+Keep the DOI file until the whole batch is done, since it is what tells the script which entries are finished.
+
 ### Format of `nime_dois.txt`
 
 After a run, the script appends lines to `nime_dois.txt` with one of two formats, depending on whether `--title` was used:
