@@ -44,8 +44,6 @@ from pybtex.database.input import bibtex
 parser = bibtex.Parser()
 
 UPLOAD_FOLDER = './upload/'
-PUBLICATION_DATE = '2026-06-23'
-CONFERENCE_DATES = '23 June - 26 June, 2026'
 CONFERENCE_TITLE = 'International Conference on New Interfaces for Musical Expression'
 CONFERENCE_ACRONYM = 'NIME'
 
@@ -259,7 +257,9 @@ def format_metadata(
     upload_pdf=False,
     print_authors=False,
     production_zenodo=False,
-    add_title=False
+    add_title=False,
+    publication_date=None,
+    conference_dates=None
 ):
     '''
     format_metadata(bibfilename):
@@ -390,10 +390,10 @@ def format_metadata(
                     'description': abstract,
                     'conference_title': CONFERENCE_TITLE,
                     'conference_acronym': CONFERENCE_ACRONYM,
-                    'conference_dates': CONFERENCE_DATES,
+                    'conference_dates': conference_dates,
                     'conference_place': address,
                     'conference_url': 'https://nime.org',
-                    'publication_date': PUBLICATION_DATE,  # pubdate, # TODO fix this aspect
+                    'publication_date': publication_date,
                     'partof_title': partof_title,
                     'imprint_title': partof_title,
                     'creators': creators,
@@ -426,8 +426,25 @@ def format_metadata(
             raise
 
 
+def conference_options(f):
+    """Required options for the conference edition being uploaded."""
+    f = click.option(
+        '--conference-dates',
+        required=True,
+        help="Dates of the conference, e.g. '23 June - 26 June, 2026'."
+    )(f)
+    f = click.option(
+        '--publication-date',
+        required=True,
+        type=click.DateTime(formats=['%Y-%m-%d']),
+        help='Publication date of the proceedings, YYYY-MM-DD.'
+    )(f)
+    return f
+
+
 @click.command()
 @click.argument('bibfile', type=click.Path(exists=True))
+@conference_options
 @click.option('--production', is_flag=True)
 @click.option(
     '--title',
@@ -435,8 +452,13 @@ def format_metadata(
     is_flag=True,
     help='Also append the paper title as the last field in nime_dois.txt'
 )
-def upload(bibfile, production, include_title):
+def upload(bibfile, publication_date, conference_dates, production, include_title):
     """Process metadata from a .bibtex file and upload to Zenodo."""
+    publication_date = publication_date.strftime('%Y-%m-%d')
+    click.secho(
+        f"Publication date: {publication_date}, conference dates: {conference_dates}",
+        fg="yellow"
+    )
     if production:
         click.secho(
             "WARNING! You are uploading to the production Zenodo server! "
@@ -455,15 +477,19 @@ def upload(bibfile, production, include_title):
         verbose=False,
         print_authors=False,
         production_zenodo=production,
-        add_title=include_title
+        add_title=include_title,
+        publication_date=publication_date,
+        conference_dates=conference_dates
     )
 
 
 @click.command()
 @click.argument('bibfile', type=click.Path(exists=True))
+@conference_options
 @click.option('--authors', is_flag=True)
-def check(bibfile, authors):
+def check(bibfile, publication_date, conference_dates, authors):
     """Process metadata from a .bibtex file and print out to check it."""
+    publication_date = publication_date.strftime('%Y-%m-%d')
     if authors:
         format_metadata(
             bibfile,
@@ -471,7 +497,9 @@ def check(bibfile, authors):
             verbose=False,
             print_authors=True,
             production_zenodo=False,
-            add_title=False
+            add_title=False,
+            publication_date=publication_date,
+            conference_dates=conference_dates
         )
     else:
         format_metadata(
@@ -480,7 +508,9 @@ def check(bibfile, authors):
             verbose=True,
             print_authors=False,
             production_zenodo=False,
-            add_title=False
+            add_title=False,
+            publication_date=publication_date,
+            conference_dates=conference_dates
         )
 
 
