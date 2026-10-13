@@ -382,6 +382,7 @@ def format_metadata(
             isbn = b.get('isbn')
             issn = b.get('issn')
 
+            # Build base metadata
             data = {
                 'metadata': {
                     'title': title,
@@ -402,6 +403,17 @@ def format_metadata(
                     'imprint_issn': issn
                 }
             }
+
+            # Pass ISSN to Zenodo "Related works → Is part of" via related_identifiers
+            if issn:
+                # This will show up under "Additional details → Related works → Is part of"
+                data['metadata']['related_identifiers'] = [
+                    {
+                        'identifier': issn,
+                        'relation': 'isPartOf',
+                        'resource_type': 'journal-issn'
+                    }
+                ]
 
             if conf_session is not None:
                 data['metadata']['conference_session'] = conf_session
