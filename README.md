@@ -45,7 +45,7 @@ poetry run python nime_zenodo_upload --help
 To run the program you will need to:
 
 - place all pdfs to be uploaded into the `upload` directory
-- find your bibtex file (e.g., `nime2036_music.bib`) with metadata for the PDFs
+- find your bibtex file (e.g., `nime2023_music.bib`) with metadata for the PDFs
 - place a file named `secrets.toml` in the same directory as this readme file. The `secrets.toml` file should have two records:
 
   ```toml
@@ -56,13 +56,15 @@ To run the program you will need to:
 Once you have your data in place, you can view the metadata that will be created (without uploading) by running:
 
 ```bash
-poetry run python nime_zenodo_upload check upload/nime2036_music.bib
+poetry run python nime_zenodo_upload check upload/nime2023_music.bib \
+  --publication-date 2023-05-31 --conference-dates '31 May - 3 June, 2023'
 ```
 
 It's a good idea to check the author names carefully as they may have been processed incorrectly:
 
 ```bash
-poetry run python nime_zenodo_upload check upload/nime2036_music.bib --authors
+poetry run python nime_zenodo_upload check upload/nime2023_music.bib \
+  --publication-date 2023-05-31 --conference-dates '31 May - 3 June, 2023' --authors
 ```
 
 Typically you would run the checks many times to make sure the metadata is perfect.
@@ -70,13 +72,15 @@ Typically you would run the checks many times to make sure the metadata is perfe
 When your metadata is ready you can try uploading to the sandbox server:
 
 ```bash
-poetry run python nime_zenodo_upload upload upload/nime2023_music.bib
+poetry run python nime_zenodo_upload upload upload/nime2023_music.bib \
+  --publication-date 2023-05-31 --conference-dates '31 May - 3 June, 2023'
 ```
 
 By default, the program uploads to the Zenodo sandbox. When you are **absolutely ready to commit to the production server** you can run:
 
 ```bash
-poetry run python nime_zenodo_upload upload upload/nime2023_music.bib --production
+poetry run python nime_zenodo_upload upload upload/nime2023_music.bib \
+  --publication-date 2023-05-31 --conference-dates '31 May - 3 June, 2023' --production
 ```
 
 to do your final uploads.
@@ -84,10 +88,24 @@ to do your final uploads.
 You can also request that the title be written into `nime_dois.txt` alongside the DOI by adding the `--title` flag:
 
 ```bash
-poetry run python nime_zenodo_upload upload upload/nime2023_music.bib --title
+poetry run python nime_zenodo_upload upload upload/nime2023_music.bib \
+  --publication-date 2023-05-31 --conference-dates '31 May - 3 June, 2023' --title
 ```
 
 This is particularly useful when you later need to associate DOIs with translated titles or multiple language versions.
+
+### Re-running after errors
+
+Production uploads write to `nime_dois.txt`; sandbox uploads write to `nime_dois_sandbox.txt`, so sandbox tests never mix with real DOIs.
+
+Zenodo sometimes answers slowly or with errors such as `504 Gateway Time-out`. The script is built so that you can simply re-run the same command:
+
+- Any PDF that already has a line in the DOI file for that server is skipped, so a re-run carries on where the last one stopped.
+- Read requests are retried a few times with increasing waits.
+- If a publish request errors, the script fetches the deposition again: a publish that timed out has often gone through anyway, in which case the DOI is recorded as normal.
+- Anything else that can't be confirmed (creating a deposition, uploading its PDF, a publish that really failed) stops the run with a message naming the deposition. Creating a deposition is never retried automatically, because a request that timed out may still have created one. Check your uploads on Zenodo, delete any unpublished draft (or publish it and add its line to the DOI file), then re-run.
+
+Keep the DOI file until the whole batch is done, since it is what tells the script which entries are finished.
 
 ### Format of `nime_dois.txt`
 
@@ -140,16 +158,19 @@ The `--title` option is especially handy when working with translated papers, be
 
 ## Conference Metadata
 
-Some of the conference metadata is still hardcoded in the file, look inside `nime_zenodo_upload/__main__.py` and update the lines:
+Every `check` and `upload` command needs the dates for the conference edition you are uploading. There are no defaults, so a run can't reuse a previous year's dates by accident:
+
+- `--publication-date`: publication date of the proceedings, as `YYYY-MM-DD`
+- `--conference-dates`: dates of the conference as shown on Zenodo, e.g. `'31 May - 3 June, 2023'`
+
+`upload` prints both before asking you to continue. The conference title and acronym are still set in `nime_zenodo_upload/__main__.py`:
 
 ```python
-PUBLICATION_DATE = '2023-05-31'
-CONFERENCE_DATES = '31 May - 3 June, 2023'
 CONFERENCE_TITLE = 'International Conference on New Interfaces for Musical Expression'
 CONFERENCE_ACRONYM = 'NIME'
 ```
 
-as needed for your edition.
+If something is wrong after publishing, metadata can be edited on Zenodo without changing the DOI. Changing the files needs a new version, which gets a new DOI.
 
 ## Additional files
 
