@@ -42,9 +42,6 @@ import time
 
 from pybtex.database.input import bibtex
 
-# Bibtex parser
-parser = bibtex.Parser()
-
 UPLOAD_FOLDER = './upload/'
 CONFERENCE_TITLE = 'International Conference on New Interfaces for Musical Expression'
 CONFERENCE_ACRONYM = 'NIME'
@@ -64,9 +61,14 @@ REQUEST_TIMEOUT = 300  # seconds
 RETRIES = 5
 RETRY_WAIT = 10  # seconds, doubled after each attempt
 
-# Tokens, replace with public and sandbox tokens from Zenodo:
-with open("secrets.toml", "rb") as f:
-    secret_data = tomllib.load(f)
+# Tokens come from the environment (ZENODO_PUBLIC_TOKEN / ZENODO_SANDBOX_TOKEN)
+# or, failing that, from secrets.toml in the current directory. They are read
+# when an upload starts, not at import, so the module can be imported and the
+# `check` command run without a secrets file.
+SECRETS_FILENAME = "secrets.toml"
+TOKEN_ENV_VARS = {True: 'ZENODO_PUBLIC_TOKEN', False: 'ZENODO_SANDBOX_TOKEN'}
+TOKEN_SECRET_KEYS = {True: 'PUBLIC_TOKEN', False: 'SANDBOX_TOKEN'}
+ZENODO_URLS = {True: 'https://zenodo.org', False: 'https://sandbox.zenodo.org'}
 
 
 class UploadError(Exception):
@@ -87,11 +89,41 @@ def doi_filename(production_zenodo):
     return DOI_FILENAME if production_zenodo else SANDBOX_DOI_FILENAME
 
 
-def recorded_pdfs(production_zenodo):
+def zenodo_url(production_zenodo):
+    return ZENODO_URLS[bool(production_zenodo)]
+
+
+def load_token(production_zenodo, secrets_file=SECRETS_FILENAME):
+    """Return the Zenodo access token for the production or sandbox server.
+
+    The environment variable (ZENODO_PUBLIC_TOKEN or ZENODO_SANDBOX_TOKEN) wins;
+    otherwise the matching key (PUBLIC_TOKEN or SANDBOX_TOKEN) is read from
+    secrets.toml. Raises UploadError if neither is set.
+    """
+    production_zenodo = bool(production_zenodo)
+    env_var = TOKEN_ENV_VARS[production_zenodo]
+    token = os.environ.get(env_var)
+    if token:
+        return token
+    key = TOKEN_SECRET_KEYS[production_zenodo]
+    try:
+        with open(secrets_file, "rb") as f:
+            secret_data = tomllib.load(f)
+    except FileNotFoundError:
+        raise UploadError(
+            f"No Zenodo token: set {env_var} or create {secrets_file} with a {key} entry."
+        )
+    token = secret_data.get(key)
+    if not token:
+        raise UploadError(f"No Zenodo token: {secrets_file} has no {key} entry (or set {env_var}).")
+    return token
+
+
+def recorded_pdfs(doi_file):
     """Return the PDF filenames that already have a DOI line in the DOI file."""
     try:
-        with open(doi_filename(production_zenodo)) as doi_file:
-            return {line.split(',', 1)[0] for line in doi_file if ',' in line}
+        with open(doi_file) as f:
+            return {line.split(',', 1)[0] for line in f if ',' in line}
     except FileNotFoundError:
         return set()
 
@@ -128,7 +160,15 @@ def _print_response_json_or_text(resp, color='red'):
         click.secho(resp.text, fg=color)
 
 
-def upload_to_zenodo(metadata, pdf_path, production_zenodo=False, add_title=False):
+def upload_to_zenodo(
+    metadata,
+    pdf_path,
+    production_zenodo=False,
+    add_title=False,
+    upload_folder=UPLOAD_FOLDER,
+    doi_file=None,
+    token=None
+):
     '''
     upload(metadata, pdf_path):
     - connects to zenodo REST API,
@@ -136,14 +176,13 @@ def upload_to_zenodo(metadata, pdf_path, production_zenodo=False, add_title=Fals
     - enters metadata,
     - uploads the .pdf and supplementary files
     - publishes it
+    - appends a line to the DOI file (nime_dois.txt or nime_dois_sandbox.txt
+      by default)
     '''
-
-    if production_zenodo:
-        ZENODO_URL = 'https://zenodo.org'
-        TOKEN = secret_data['PUBLIC_TOKEN']  # either SANDBOX_TOKEN or PUBLIC_TOKEN
-    else:
-        ZENODO_URL = 'https://sandbox.zenodo.org'
-        TOKEN = secret_data['SANDBOX_TOKEN']
+    ZENODO_URL = zenodo_url(production_zenodo)
+    TOKEN = token if token is not None else load_token(production_zenodo)
+    if doi_file is None:
+        doi_file = doi_filename(production_zenodo)
 
     # Track supplementary files that were too large or otherwise skipped
     skipped_supplementary = []
@@ -194,7 +233,7 @@ def upload_to_zenodo(metadata, pdf_path, production_zenodo=False, add_title=Fals
         )
     )
     upload_metadata = {'filename': pdf_path}
-    pdf_full_path = os.path.join(UPLOAD_FOLDER, pdf_path)
+    pdf_full_path = os.path.join(upload_folder, pdf_path)
     try:
         with open(pdf_full_path, 'rb') as pdf_file:
             add_file = requests.post(
@@ -220,7 +259,7 @@ def upload_to_zenodo(metadata, pdf_path, production_zenodo=False, add_title=Fals
         )
 
     # Upload supplementary files (if any)
-    all_files = os.listdir(UPLOAD_FOLDER)
+    all_files = os.listdir(upload_folder)
     pdf_fname_prefix = pdf_path[:-4] + "_"
     matching_files = [file for file in all_files if file.startswith(pdf_fname_prefix)]
 
@@ -228,7 +267,7 @@ def upload_to_zenodo(metadata, pdf_path, production_zenodo=False, add_title=Fals
         if extra_file_path == pdf_path:
             continue
 
-        full_extra_path = os.path.join(UPLOAD_FOLDER, extra_file_path)
+        full_extra_path = os.path.join(upload_folder, extra_file_path)
         file_size = os.path.getsize(full_extra_path)
 
         # Pre-check size: skip if over MAX_SUPP_BYTES
@@ -314,7 +353,7 @@ def upload_to_zenodo(metadata, pdf_path, production_zenodo=False, add_title=Fals
             raise UploadError(
                 f"Publishing {pdf_path} (deposition {submission_id}) failed. It is an unpublished "
                 f"draft: publish or delete it at {ZENODO_URL}/me/uploads, and if you publish it, "
-                f"add its DOI line to {doi_filename(production_zenodo)} before re-running."
+                f"add its DOI line to {doi_file} before re-running."
             )
         click.secho(f"...but deposition {submission_id} was published anyway.", fg='yellow')
     elif not published:
@@ -337,7 +376,7 @@ def upload_to_zenodo(metadata, pdf_path, production_zenodo=False, add_title=Fals
         doi_field = f"{retrieved_doi}*{skipped_list}"
         click.secho(
             f"Supplementary files skipped for {pdf_path}: {skipped_list}. "
-            f"Marked DOI as {doi_field} in {doi_filename(production_zenodo)}.",
+            f"Marked DOI as {doi_field} in {doi_file}.",
             fg='yellow'
         )
 
@@ -353,8 +392,152 @@ def upload_to_zenodo(metadata, pdf_path, production_zenodo=False, add_title=Fals
     else:
         line = f'{pdf_path},{submission_id},{doi_field}\n'
 
-    with open(doi_filename(production_zenodo), 'a') as doi_file:
-        doi_file.write(line)
+    with open(doi_file, 'a') as f:
+        f.write(line)
+
+
+def author_name(person):
+    """Format a pybtex Person as the name string Zenodo gets.
+
+    Braces are removed so protected names such as {jasch} stay whole, and the
+    "von" particle is kept because pybtex puts it in the name. UTF-8 accents
+    pass through unchanged; the .bib file should use them rather than LaTeX
+    accents (see README).
+    """
+    name = str(person)
+    name = name.replace("}", "")
+    name = name.replace("{", "")
+    name = name.replace("\\\"", "")
+    return name
+
+
+def pdf_name_for(entry):
+    """The PDF filename of a bib entry: the last part of its Url field."""
+    return entry.fields['Url'].rsplit('/', 1)[-1]
+
+
+def entry_to_metadata(entry, publication_date, conference_dates):
+    """Build the Zenodo deposition metadata for one pybtex entry.
+
+    Pure: reads the entry and returns the dict that is POSTed to Zenodo.
+    Raises KeyError if Title, Url or Author is missing.
+    """
+    b = entry.fields
+    title = b['Title']
+    creators = [{'name': author_name(author)} for author in entry.persons["Author"]]
+
+    address = b.get('Address', 'Address')
+    pages = b.get('Pages', None)
+    abstract = b.get('Abstract', '---')  # if no abstract is found, --- will be used as default
+    partof_title = b.get('booktitle')
+    conf_session = b.get('note', None)
+    isbn = b.get('isbn')
+    issn = b.get('issn')
+
+    # Build base metadata
+    data = {
+        'metadata': {
+            'title': title,
+            'upload_type': 'publication',
+            'publication_type': 'conferencepaper',
+            'description': abstract,
+            'conference_title': CONFERENCE_TITLE,
+            'conference_acronym': CONFERENCE_ACRONYM,
+            'conference_dates': conference_dates,
+            'conference_place': address,
+            'conference_url': 'https://nime.org',
+            'publication_date': publication_date,
+            'partof_title': partof_title,
+            'imprint_title': partof_title,
+            'creators': creators,
+            'communities': [{'identifier': 'nime_conference'}],  # adds to Zenodo NIME community
+            'imprint_isbn': isbn,
+            'imprint_issn': issn
+        }
+    }
+
+    # Pass ISSN to Zenodo "Related works → Is part of" via related_identifiers
+    if issn:
+        # This will show up under "Additional details → Related works → Is part of"
+        # Zenodo detects the ISSN scheme from the value. It rejects a
+        # resource_type here that is not one of its upload types
+        # (e.g. 'journal-issn' gives 400 "Invalid value journal-issn"),
+        # so none is given.
+        data['metadata']['related_identifiers'] = [
+            {
+                'identifier': issn,
+                'relation': 'isPartOf'
+            }
+        ]
+
+    if conf_session is not None:
+        data['metadata']['conference_session'] = conf_session
+
+    if pages is not None:
+        data['metadata']['partof_pages'] = pages
+
+    return data
+
+
+def check_pdfs(bibdata, upload_folder):
+    """Report PDFs that are missing from or too large for the upload folder.
+
+    Returns True if every entry's PDF is present and under MAX_PDF_BYTES.
+    Entries without a Url are left for the per-entry handling to report.
+    """
+    oversized_pdfs = []
+    missing_pdfs = []
+    for bib_id in bibdata.entries:
+        try:
+            pdf_name = pdf_name_for(bibdata.entries[bib_id])
+        except KeyError:
+            # If Url is missing, this entry will fail later anyway; let the normal logic handle it.
+            continue
+        pdf_path = os.path.join(upload_folder, pdf_name)
+
+        if not os.path.exists(pdf_path):
+            missing_pdfs.append(pdf_name)
+            continue
+
+        size = os.path.getsize(pdf_path)
+        if size > MAX_PDF_BYTES:
+            oversized_pdfs.append((pdf_name, size))
+
+    if missing_pdfs:
+        click.secho(
+            "The following PDFs referenced in the .bib file do not exist in the upload folder:",
+            fg='red'
+        )
+        for name in sorted(set(missing_pdfs)):
+            click.secho(f"  - {name}", fg='red')
+        click.secho(
+            "Fix the missing files before running the upload.",
+            fg='red'
+        )
+        return False
+
+    if oversized_pdfs:
+        click.secho(
+            "One or more PDFs are larger than 100 MB and will fail to upload:",
+            fg='red'
+        )
+        for name, size in sorted(set(oversized_pdfs)):
+            click.secho(
+                f"  - {name}: {size / (1024 * 1024):.1f} MB",
+                fg='red'
+            )
+        click.secho(
+            "Zenodo rejects these large PDF uploads (HTTP 413). "
+            "Please compress or split these PDFs to be under 100 MB and try again.",
+            fg='red'
+        )
+        click.secho(
+            "Aborting before starting any uploads. No Zenodo records were created.",
+            fg='red'
+        )
+        return False
+
+    return True
 
 
 def format_metadata(
@@ -365,7 +548,9 @@ def format_metadata(
     production_zenodo=False,
     add_title=False,
     publication_date=None,
-    conference_dates=None
+    conference_dates=None,
+    upload_folder=UPLOAD_FOLDER,
+    doi_file=None
 ):
     '''
     format_metadata(bibfilename):
@@ -373,170 +558,37 @@ def format_metadata(
     - for each entry, metadata is formatted and the upload function
       above is called in order to publish record
     '''
-    bibdata = parser.parse_file(bibfilename)
+    if doi_file is None:
+        doi_file = doi_filename(production_zenodo)
+    bibdata = bibtex.Parser().parse_file(bibfilename)
 
-    # If we are going to upload PDFs, pre-check that none of them exceed MAX_PDF_BYTES.
-    if upload_pdf:
-        oversized_pdfs = []
-        missing_pdfs = []
-        for bib_id in bibdata.entries:
-            b = bibdata.entries[bib_id].fields
-            try:
-                conf_url = b['Url']
-                pdf_name = conf_url.rsplit('/', 1)[-1]
-                pdf_path = os.path.join(UPLOAD_FOLDER, pdf_name)
-
-                if not os.path.exists(pdf_path):
-                    missing_pdfs.append(pdf_name)
-                    continue
-
-                size = os.path.getsize(pdf_path)
-                if size > MAX_PDF_BYTES:
-                    oversized_pdfs.append((pdf_name, size))
-            except KeyError:
-                # If Url is missing, this entry will fail later anyway; let the normal logic handle it.
-                continue
-
-        if missing_pdfs:
-            click.secho(
-                "The following PDFs referenced in the .bib file do not exist in the upload folder:",
-                fg='red'
-            )
-            for name in sorted(set(missing_pdfs)):
-                click.secho(f"  - {name}", fg='red')
-            click.secho(
-                "Fix the missing files before running the upload.",
-                fg='red'
-            )
-            # Abort before any upload.
-            return
-
-        if oversized_pdfs:
-            click.secho(
-                "One or more PDFs are larger than 100 MB and will fail to upload:",
-                fg='red'
-            )
-            for name, size in sorted(set(oversized_pdfs)):
-                click.secho(
-                    f"  - {name}: {size / (1024 * 1024):.1f} MB",
-                    fg='red'
-                )
-            click.secho(
-                "Zenodo rejects these large PDF uploads (HTTP 413). "
-                "Please compress or split these PDFs to be under 100 MB and try again.",
-                fg='red'
-            )
-            click.secho(
-                "Aborting before starting any uploads. No Zenodo records were created.",
-                fg='red'
-            )
-            return
-
-    title = 'title'
-    abstract = 'abstract'
-    address = 'address'
-    creators = 'creators'
-    pubdate = '20XX-06-01'
-    pages = 'x-x'
-    conf_url = ''
-    pdf_name = ''
-    creators = []
+    # If we are going to upload PDFs, pre-check that all of them exist and
+    # none of them exceed MAX_PDF_BYTES. Abort before any upload otherwise.
+    if upload_pdf and not check_pdfs(bibdata, upload_folder):
+        return
 
     # loop through the individual entries
     for bib_id in bibdata.entries:
-        title = 'title'
-        abstract = 'abstract'
-        address = 'address'
-        creators = 'creators'
-        pubdate = '20XX-06-01'
-        pages = 'x-x'
-        conf_url = ''
-        pdf_name = ''
-        creators = []
-
-        b = bibdata.entries[bib_id].fields
+        entry = bibdata.entries[bib_id]
         try:
-            conf_url = b['Url']
-            pdf_name = conf_url.rsplit('/', 1)[-1]
+            pdf_name = pdf_name_for(entry)
 
-            if not os.path.exists(UPLOAD_FOLDER + pdf_name):
+            if not os.path.exists(os.path.join(upload_folder, pdf_name)):
                 click.secho(f'PDF: {pdf_name} does not exist in the upload folder!', fg='red')
                 raise Exception(f'The PDF {pdf_name} did not exist in the upload folder.')
 
-            title = b['Title']
-            for author in bibdata.entries[bib_id].persons["Author"]:
-                author_name = str(author)
-                # TODO: would be better to use https://github.com/phfaist/pylatexenc
-                # author_name = bytes(author_name,"utf-8").decode("latex","ignore")
-                author_name = author_name.replace("}", "")
-                author_name = author_name.replace("{", "")
-                author_name = author_name.replace("\\\"", "")
-                creators.append({'name': author_name})
-                if print_authors:
-                    pprint.pp(author_name)
-
-            yr_seg = conf_url.rsplit('/', 1)[-2]
-            yr = yr_seg.rsplit('/', 1)[-1]
-            pubdate = yr + pubdate[4:]
-
-            address = b.get('Address', 'Address')
-            pages = b.get('Pages', None)
-            abstract = b.get('Abstract', '---')  # if no abstract is found, --- will be used as default
-            track = b.get('track')  # could be used for conference_session key
-            partof_title = b.get('booktitle')
-            conf_session = b.get('note', None)
-            isbn = b.get('isbn')
-            issn = b.get('issn')
-
-            # Build base metadata
-            data = {
-                'metadata': {
-                    'title': title,
-                    'upload_type': 'publication',
-                    'publication_type': 'conferencepaper',
-                    'description': abstract,
-                    'conference_title': CONFERENCE_TITLE,
-                    'conference_acronym': CONFERENCE_ACRONYM,
-                    'conference_dates': conference_dates,
-                    'conference_place': address,
-                    'conference_url': 'https://nime.org',
-                    'publication_date': publication_date,
-                    'partof_title': partof_title,
-                    'imprint_title': partof_title,
-                    'creators': creators,
-                    'communities': [{'identifier': 'nime_conference'}],  # adds to Zenodo NIME community
-                    'imprint_isbn': isbn,
-                    'imprint_issn': issn
-                }
-            }
-
-            # Pass ISSN to Zenodo "Related works → Is part of" via related_identifiers
-            if issn:
-                # This will show up under "Additional details → Related works → Is part of"
-                # Zenodo detects the ISSN scheme from the value. It rejects a
-                # resource_type here that is not one of its upload types
-                # (e.g. 'journal-issn' gives 400 "Invalid value journal-issn"),
-                # so none is given.
-                data['metadata']['related_identifiers'] = [
-                    {
-                        'identifier': issn,
-                        'relation': 'isPartOf'
-                    }
-                ]
-
-            if conf_session is not None:
-                data['metadata']['conference_session'] = conf_session
-
-            if pages is not None:
-                data['metadata']['partof_pages'] = pages
+            data = entry_to_metadata(entry, publication_date, conference_dates)
+            if print_authors:
+                for creator in data['metadata']['creators']:
+                    pprint.pp(creator['name'])
 
             if verbose:
                 pprint.pp(data['metadata'])
 
             if upload_pdf:
-                if pdf_name in recorded_pdfs(production_zenodo):
+                if pdf_name in recorded_pdfs(doi_file):
                     click.secho(
-                        f"Skipping {pdf_name}: already in {doi_filename(production_zenodo)}",
+                        f"Skipping {pdf_name}: already in {doi_file}",
                         fg='cyan'
                     )
                     continue
@@ -544,7 +596,9 @@ def format_metadata(
                     data,
                     pdf_name,
                     production_zenodo=production_zenodo,
-                    add_title=add_title
+                    add_title=add_title,
+                    upload_folder=upload_folder,
+                    doi_file=doi_file
                 )
 
         except (KeyError):
@@ -597,6 +651,10 @@ def upload(bibfile, publication_date, conference_dates, production, include_titl
             "You are uploading to the sandbox Zenodo server! Test here as much as you want.",
             fg="green"
         )
+    try:
+        load_token(production)  # fail before the prompt if no token is configured
+    except UploadError as e:
+        raise click.ClickException(str(e))
     input("Press Enter to continue or Ctrl-C to abort.")
     # Add date and time for this upload
     with open(doi_filename(production), 'a') as doi_file:
@@ -654,7 +712,9 @@ def cli():
     pass
 
 
+cli.add_command(upload)
+cli.add_command(check)
+
+
 if __name__ == '__main__':
-    cli.add_command(upload)
-    cli.add_command(check)
     cli()

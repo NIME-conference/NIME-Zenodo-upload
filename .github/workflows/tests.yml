@@ -1,0 +1,28 @@
+# Unit tests: no network, no Zenodo token. The upload flow runs against a
+# fake Zenodo (the `responses` library). A sandbox run is still the final
+# check before a production upload, see README.
+name: Tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # Current stable Python; moves forward on its own.
+          python-version: "3.x"
+      - run: pipx install poetry
+      - run: poetry install
+      - run: poetry run pytest

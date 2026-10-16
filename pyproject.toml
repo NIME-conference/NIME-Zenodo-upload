@@ -16,6 +16,13 @@ requests = "^2.31.0"
 # which is no longer bundled with newer setuptools versions.
 setuptools = "<70"
 
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3"
+responses = "^0.25"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
