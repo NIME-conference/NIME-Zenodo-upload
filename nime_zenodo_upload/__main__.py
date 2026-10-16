@@ -502,11 +502,14 @@ def format_metadata(
             # Pass ISSN to Zenodo "Related works → Is part of" via related_identifiers
             if issn:
                 # This will show up under "Additional details → Related works → Is part of"
+                # Zenodo detects the ISSN scheme from the value. It rejects a
+                # resource_type here that is not one of its upload types
+                # (e.g. 'journal-issn' gives 400 "Invalid value journal-issn"),
+                # so none is given.
                 data['metadata']['related_identifiers'] = [
                     {
                         'identifier': issn,
-                        'relation': 'isPartOf',
-                        'resource_type': 'journal-issn'
+                        'relation': 'isPartOf'
                     }
                 ]
 
