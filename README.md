@@ -17,7 +17,7 @@ For the proceedings chair of the conference, your workflow should be:
 1. (before the conference) make sure **all** camera-ready submissions for each track are correct and hassle authors to update if there are errors—do this before the conference and emphasise that submissions cannot be updated after the conference.
 2. (after the conference) create an accurate spreadsheet for all submissions that should be in the proceedings for each track. Create a `.bib` file from these data following the format in the [NIME bibliography](https://github.com/NIME-conference/NIME-bibliography). All fields must be filled in except for `doi`.
 3. put the `.bib` file and pdf submission files into the `upload` directory of this project.
-4. follow the "Install" and "Run" instructions below and test multiple times with the Zenodo sandbox to make sure that your metadata is correct and working.
+4. follow the "Install" and "Run" instructions below: run `check` until the metadata is right, then test with the Zenodo sandbox to make sure the upload works end to end.
 5. upload to production Zenodo. The output file `nime_dois.txt` will show the DOI for each pdf you have uploaded.
 
 Then you can pass the `nime_dois.txt` file to the proceedings officer of NIME who will:
@@ -46,12 +46,14 @@ To run the program you will need to:
 
 - place all pdfs to be uploaded into the `upload` directory
 - find your bibtex file (e.g., `nime2023_music.bib`) with metadata for the PDFs
-- place a file named `secrets.toml` in the same directory as this readme file. The `secrets.toml` file should have two records:
+- give the program your Zenodo tokens, either in a file named `secrets.toml` in the same directory as this readme file:
 
   ```toml
   PUBLIC_TOKEN = 'replace-with-your-zenodo-public-token'
   SANDBOX_TOKEN = 'replace-with-your-zenodo-sandbox-token'
   ```
+
+  or as the environment variables `ZENODO_PUBLIC_TOKEN` and `ZENODO_SANDBOX_TOKEN`, which take precedence over the file. Tokens are only read when `upload` runs, so `check` works without them.
 
 Once you have your data in place, you can view the metadata that will be created (without uploading) by running:
 
@@ -69,7 +71,7 @@ poetry run python nime_zenodo_upload check upload/nime2023_music.bib \
 
 Typically you would run the checks many times to make sure the metadata is perfect.
 
-When your metadata is ready you can try uploading to the sandbox server:
+When your metadata is ready, the last check before a real upload is a run against the sandbox server. It exercises the real Zenodo API with your real files, which the unit tests (see "Tests" below) cannot do:
 
 ```bash
 poetry run python nime_zenodo_upload upload upload/nime2023_music.bib \
@@ -228,6 +230,19 @@ During post-processing, you can:
 2. Split the DOI field on `*` (if present) to separate the pure DOI from the list of skipped filenames.
 3. Manually upload those large supplementary files to the corresponding Zenodo deposition via the web UI.
 4. Optionally, update or regenerate `nime_dois.txt` once the manual uploads are complete and you know the final DOIs you want to distribute.
+
+## Tests
+
+The repository has a pytest suite in `tests/` that runs without a network connection or a Zenodo token. It covers the bib-to-metadata conversion (`entry_to_metadata`), author name handling, token scrubbing in error messages, the DOI file format and skip logic, the command line options, and the whole upload flow (create, file upload, publish, confirm, DOI line) against a fake Zenodo built with the [`responses`](https://github.com/getsentry/responses) library, including the failure cases: a 400 on create, a dropped connection, and a publish that times out but goes through anyway.
+
+```bash
+poetry install
+poetry run pytest
+```
+
+GitHub Actions runs the same suite on every push and pull request (`.github/workflows/tests.yml`), on the current stable Python.
+
+The tests are the first line of defence; a sandbox run with the real `.bib` file and PDFs is still the final check before uploading to production.
 
 ## The `.bib` file
 
