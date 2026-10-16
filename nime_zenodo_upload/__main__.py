@@ -35,6 +35,7 @@ import datetime
 #import latexcodec # TODO: remove this.
 import click
 import os
+import re
 import tomllib
 import pprint
 import time
@@ -72,6 +73,16 @@ class UploadError(Exception):
     """An upload step failed and its outcome on Zenodo could not be confirmed."""
 
 
+def _scrub(text):
+    """Remove the access token from text destined for the terminal or a log.
+
+    requests puts the full URL, query string included, into its exception
+    messages, so any error that quotes the exception would otherwise print
+    the token.
+    """
+    return re.sub(r'access_token=[^&\s)]+', 'access_token=***', str(text))
+
+
 def doi_filename(production_zenodo):
     return DOI_FILENAME if production_zenodo else SANDBOX_DOI_FILENAME
 
@@ -99,7 +110,7 @@ def _get_with_retries(url, token):
                 return resp
             problem = f"status code {resp.status_code}"
         except requests.RequestException as e:
-            problem = str(e)
+            problem = _scrub(e)
         if attempt < RETRIES:
             click.secho(f"GET {url} failed ({problem}), retrying in {wait} s", fg='yellow')
             time.sleep(wait)
@@ -155,7 +166,7 @@ def upload_to_zenodo(metadata, pdf_path, production_zenodo=False, add_title=Fals
         )
     except requests.RequestException as e:
         raise UploadError(
-            f"Creating the deposition for {pdf_path} failed ({e}). "
+            f"Creating the deposition for {pdf_path} failed ({_scrub(e)}). "
             f"Check {ZENODO_URL}/me/uploads for an unpublished draft and delete it before re-running."
         )
 
@@ -191,7 +202,7 @@ def upload_to_zenodo(metadata, pdf_path, production_zenodo=False, add_title=Fals
             )
     except requests.RequestException as e:
         raise UploadError(
-            f"Uploading {pdf_path} to draft {submission_id} failed ({e}). "
+            f"Uploading {pdf_path} to draft {submission_id} failed ({_scrub(e)}). "
             f"Delete the draft at {ZENODO_URL}/me/uploads before re-running."
         )
 
@@ -247,7 +258,7 @@ def upload_to_zenodo(metadata, pdf_path, production_zenodo=False, add_title=Fals
                     timeout=REQUEST_TIMEOUT
                 )
         except requests.RequestException as e:
-            click.secho(f"Supplementary file upload of {extra_file_path} failed: {e}", fg='red')
+            click.secho(f"Supplementary file upload of {extra_file_path} failed: {_scrub(e)}", fg='red')
             skipped_supplementary.append(extra_file_path)
             continue
 
@@ -284,7 +295,7 @@ def upload_to_zenodo(metadata, pdf_path, production_zenodo=False, add_title=Fals
         publish_problem = None if publish_record.status_code <= 210 else publish_record.status_code
     except requests.RequestException as e:
         publish_record = None
-        publish_problem = e
+        publish_problem = _scrub(e)
 
     # get back the deposition to confirm it was published and read the DOI.
     # A publish that errored (e.g. 504) may still have gone through on Zenodo.
